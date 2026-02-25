@@ -1,7 +1,6 @@
 const { Plugin, PluginSettingTab, Setting } = require('obsidian')
 
 const DEFAULT_SETTINGS = {
-	nextStepTag: '#next-step',
 	waitingForTag: '#waiting-for',
 	projectsFolderPrefix: 'Projects/',
 	projectFileCache: {
@@ -35,15 +34,19 @@ function* stringLineIteratorNoCode(string) {
 	}
 }
 
-const findNextStepOrWaitingFor = (string, nextStepTagRegex, waitingForTagRegex) => {
+const findNextStepOrWaitingFor = (string, waitingForTagRegex) => {
 	let hasNextStep = false
+	let hasWaitingFor = false
 	for (let line of stringLineIteratorNoCode(string)) {
 		if (line.includes('- [ ] ')) {
-			if (waitingForTagRegex.test(line)) return { hasWaitingFor: true }
-			if (nextStepTagRegex.test(line)) hasNextStep = true
+			if (waitingForTagRegex.test(line)) {
+				hasWaitingFor = true
+			} else {
+				hasNextStep = true
+			}
 		}
 	}
-	return { hasNextStep }
+	return { hasNextStep, hasWaitingFor }
 }
 
 const makeTaskRegex = tagString => new RegExp(`^\\s*-\\s{1,2}\\[\\s]\\s.*${tagString}[\\W]*`, 'm')
@@ -55,14 +58,17 @@ const clearAllBadges = (fileItem) => {
 
 const paintFileBadge = (opts, fileItem) => {
 	const {nextStep, waitingFor} = opts || {}
-	if (!nextStep && !waitingFor) {
-		fileItem.coverEl.removeClass('gtd-waiting-for')
-		fileItem.coverEl.addClass('gtd-no-next-step')
+	if (nextStep) {
+		// Has at least one incomplete task that isn't waiting - no badge needed
+		clearAllBadges(fileItem)
 	} else if (waitingFor) {
+		// All incomplete tasks are waiting
 		fileItem.coverEl.removeClass('gtd-no-next-step')
 		fileItem.coverEl.addClass('gtd-waiting-for')
 	} else {
-		clearAllBadges(fileItem)
+		// No incomplete tasks at all
+		fileItem.coverEl.removeClass('gtd-waiting-for')
+		fileItem.coverEl.addClass('gtd-no-next-step')
 	}
 }
 
@@ -70,7 +76,6 @@ const paintFileBadge = (opts, fileItem) => {
 module.exports = class GtdNoNextStep extends Plugin {
 	async onload() {
 		await this.loadSettings()
-		this.nextStepTagRegex = makeTaskRegex(this.settings.nextStepTag)
 		this.waitingForTagRegex = makeTaskRegex(this.settings.waitingForTag)
 
 		const handleEvent = (event, originalFilename) => {
@@ -99,7 +104,7 @@ module.exports = class GtdNoNextStep extends Plugin {
 		&& filename.endsWith('.md')
 		&& !filename.includes('/_')
 
-	containsIncompleteNextStepOrWaitingFor = string => findNextStepOrWaitingFor(string, this.nextStepTagRegex, this.waitingForTagRegex)
+	containsIncompleteNextStepOrWaitingFor = string => findNextStepOrWaitingFor(string, this.waitingForTagRegex)
 
 	scheduleRepaintBadge = (path, clearAll) => {
 		window.setTimeout(() => {
@@ -196,18 +201,6 @@ class SettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.projectsFolderPrefix)
 					.onChange(async (value) => {
 						this.plugin.settings.projectsFolderPrefix = value
-						await this.plugin.saveSettings()
-					})
-			)
-		new Setting(containerEl)
-			.setName('Next-Step tag')
-			.setDesc('The tag that indicates a task has a next step.')
-			.addText(
-				text => text
-					.setPlaceholder(DEFAULT_SETTINGS.nextStepTag)
-					.setValue(this.plugin.settings.nextStepTag)
-					.onChange(async (value) => {
-						this.plugin.settings.nextStepTag = value
 						await this.plugin.saveSettings()
 					})
 			)
